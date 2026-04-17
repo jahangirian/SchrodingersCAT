@@ -1,0 +1,2 @@
+# SchrodingersCAT
+Quantum Inspired Intelligence 
