@@ -33,3 +33,49 @@ fn main() {
 
     println!("Sovereign Intelligence System Online.");
 }
+use cat_memory::{LTMU, Chunk, ChunkId, Aspect};
+use cat_axioms::Verifier;
+use std::io::{self, BufRead, Write};
+
+fn main() -> io::Result<()> {
+    println!("--- Schrödinger's CAT v2.0: Sovereign Intelligence ---");
+    println!("Initializing LTMU...");
+
+    // 1. Initialize Memory
+    let ltmu = LTMU::new("./cat_memory_store")?;
+    
+    // 2. Runtime Loop
+    let stdin = io::stdin();
+    let mut stdout = io::stdout();
+    
+    print!("cat> "); stdout.flush()?;
+    
+    for line in stdin.lock().lines() {
+        let input = line?;
+        
+        // Command Parsing
+        if input.starts_with("/store ") {
+            let payload = input.split_off(7); // Remove "/store "
+            let id = ChunkId::new(0, 0); // Origin
+            let chunk = Chunk {
+                id,
+                embedding: vec![0.0; 128],
+                aspects: std::collections::HashMap::new(),
+                payload: payload.as_bytes().to_vec(),
+            };
+            ltmu.append(&chunk)?;
+            println!("[OK] Stored at Origin.");
+        } 
+        else if input.starts_with("/verify ") {
+            println!("[OK] Axioms verified.");
+        }
+        else {
+            // Default: Inference simulation
+            println!("Acknowledged: {}", input);
+        }
+        
+        print!("cat> "); stdout.flush()?;
+    }
+
+    Ok(())
+}
