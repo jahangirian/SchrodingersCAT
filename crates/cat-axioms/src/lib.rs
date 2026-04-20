@@ -53,3 +53,34 @@ fn compute_merkle_root(data: &[u8]) -> [u8; 32] {
     hasher.update(data);
     *hasher.finalize().as_bytes()
 }
+use sha2::{Sha256, Digest};
+
+#[derive(Debug)]
+pub enum Axiom {
+    A3_Provenance,
+    A5_EnergyBound,
+}
+
+#[derive(Debug)]
+pub enum Verification {
+    Valid,
+    Violated(Axiom, String),
+}
+
+pub struct Verifier;
+
+impl Verifier {
+    /// Axiom A3: Provenance Invariance.
+    /// Verifies that data payload matches the claimed hash.
+    pub fn verify_provenance(data: &[u8], claimed_hash: &[u8]) -> Verification {
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        let result = hasher.finalize();
+        
+        if result.as_slice() == claimed_hash {
+            Verification::Valid
+        } else {
+            Verification::Violated(Axiom::A3_Provenance, "Hash mismatch".into())
+        }
+    }
+}
