@@ -1,46 +1,107 @@
-//! cat-memory: Long-Term Memory Unit
-//! Implements the Octahedral Pentagram geometry with Aspected Retrieval.
-
 pub mod geometry;
 pub mod store;
 
-/// Represents a single point in the Octahedral Pentagram space.
-/// Encodes (Radius, Spoke) into a deterministic 64-bit ID.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ChunkId(u64);
+use serde::{Serialize, Deserialize};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::RwLock;
+
+/// The core ChunkId encoding Radius and Spoke.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ChunkId(pub u64);
 
 impl ChunkId {
-    /// Encodes radius (shell) and spoke (axis) into a ChunkId.
-    /// Upper 56 bits: Radius. Lower 8 bits: Spoke.
     pub fn new(radius: u64, spoke: u8) -> Self {
         ChunkId((radius << 8) | (spoke as u64))
     }
-
-    pub fn radius(&self) -> u64 {
-        self.0 >> 8
-    }
-
-    pub fn spoke(&self) -> u8 {
-        (self.0 & 0xFF) as u8
-    }
+    pub fn radius(&self) -> u64 { self.0 >> 8 }
+    pub fn spoke(&self) -> u8 { (self.0 & 0xFF) as u8 }
 }
 
-/// Aspects for Holographic Retrieval.
-/// Maps to the Pentagram geometry to filter relevance, not just similarity.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
 pub enum Aspect {
-    Time,       // Temporal relevance
-    Truth,      // Provenance/Verification status
-    Structure,  // Logical or Data structure type
-    Origin,     // Source/Ownership
-    Sensitivity // Security/Privacy classification
+    Time,
+    Truth,
+    Origin,
 }
 
-/// A data chunk stored in the LTMU.
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Chunk {
     pub id: ChunkId,
-    pub embedding: [f32; 256], // Base semantic vector
-    // Aspected embeddings allow multi-dimensional relevance filtering
-    pub aspects: std::collections::HashMap<Aspect, Vec<f32>>,
+    pub embedding: Vec<f32>,
+    pub aspects: HashMap<Aspect, Vec<f32>>,
     pub payload: Vec<u8>,
 }
+
+/// The Long-Term Memory Unit.
+pub struct LTMU {
+    base_path: PathBuf,
+    index: RwLock<HashMap<ChunkId, PathBuf>>, // In-memory index
+}
+
+impl LTMU {
+    pub fn new(base_path: &str) -> std::io::Result<Self> {
+        std::fs::create_dir_all(base_path)?;
+        Ok(Self {
+            base_path: PathBuf::from(base_path),
+            index: RwLock::new(HashMap::new()),
+        })
+    }
+
+    /// Appends a chunk deterministically.
+    pub fn append(&self, chunk: &Chunk) -> std::io::Result<()> {
+        let radius = chunk.id.radius();
+        let segment_path = self.base_path.join(format!("shell_{}.seg", radius));
+        
+        // Use append-only file IO
+        use std::fs::OpenOptions;
+        use std::io::Write;
+        
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&segment_path)?;
+            
+        // Serialize chunk to binary
+        let encoded = bincode::serialize(chunk).unwrap();
+        let len = encoded.len() as u32;
+        
+        file.write_all(&len.to_le_bytes())?;
+        file.write_all(&encoded)?;
+        
+        // Update index
+        self.index.write().unwrap().insert(chunk.id, segment_path);
+        Ok(())
+    }
+
+    /// Retrieves a chunk by ID.
+    pub fn get(&self, id: ChunkId) -> std::io::Result<Option<Chunk>> {
+        // In a real implementation, we would seek to the offset stored in an index file.
+        // For this operational prototype, we scan the shell file.
+        let radius = id.radius();
+        let segment_path = self.base_path.join(format!("shell_{}.seg", radius));
+        
+        if !segment_path.exists() { return Ok(None); }
+        
+        let data = std::fs::read(segment_path)?;
+        let mut cursor = std::io::Cursor::new(&data);
+        
+        while (cursor.position() as usize) < data.len() {
+            let mut len_bytes = [0u8; 4];
+            if cursor.read_exact(&mut len_bytes).is_err() { break; }
+            let len = u32::from_le_bytes(len_bytes) as usize;
+            
+            let mut buffer = vec![0u8; len];
+            cursor.read_exact(&mut buffer)?;
+            
+            if let Ok(chunk) = bincode::deserialize::<Chunk>(&buffer) {
+                if chunk.id == id {
+                    return Ok(Some(chunk));
+                }
+            }
+        }
+        Ok(None)
+    }
+}
+
+use std::io::Read; // Needed for Read trait
